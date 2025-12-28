@@ -204,7 +204,7 @@ export default class WhisperBuddy extends Plugin {
 			id: "open-ghost-reader-view",
 			name: "Open Whisper Buddy Ghosts view",
 			callback: () => {
-				new CreatePresetModal(this).open();
+				this.activateControlsView();
 			},
 		});
 	}
