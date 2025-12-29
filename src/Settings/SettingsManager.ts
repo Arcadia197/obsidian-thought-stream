@@ -4,31 +4,37 @@ import WhisperBuddy from "../../main";
 import {CreativityOptions} from "../GhostWriter/GhostWriter";
 
 export interface WhisperBuddySettings {
-	transcriptionApiKey: string;
-	transcriptionApiUrl: string;
-	transcriptionModel: string;
-	transcriptionPrompt: string;
+	// OpenAI Configuration
+	openaiApiKey: string;
+	openaiApiUrl: string;
+
+	// Model Settings
+	whisperModel: string;
+	completionsModel: string;
 	language: string;
+
+	// Transcription Settings
+	transcriptionPrompt: string;
 	saveAudioFile: boolean;
 	saveAudioFilePath: string;
 	createNewFileAfterRecording: boolean;
 	createNewFileAfterRecordingPath: string;
 	saveRecordingToClipboard: boolean;
 
-	completionApiKey: string;
-	completionModel: string;
-	completionApiUrl: string;
+	// Ghost Writer Settings
+	ghostWriterSystemPrompt: string;
 	completionPrompt: string;
 	saveDraftsFilePath: string;
 	lastUsedPreset: string;
-	ghostWriterSystemPrompt: string;
 
+	// Ghost Reader Settings
+	ghostReaderSystemPrompt: string;
+	ghostReaderMaxQuestions: number;
 	autoReadActiveFile: boolean;
 	autoReadActiveFileIncludeExcludeType: IncludeExcludeType;
 	autoReadActiveFileExclude: string[];
 	autoReadActiveFileInclude: string[];
 	autoReadMinimumCharacterCount: number;
-	ghostReaderSystemPrompt: string;
 
 	debugMode: boolean;
 }
@@ -36,23 +42,24 @@ export interface WhisperBuddySettings {
 type IncludeExcludeType = 'path' | 'tag';
 
 export const DEFAULT_SETTINGS: WhisperBuddySettings = {
-	transcriptionApiKey: "",
-	transcriptionApiUrl: "https://api.openai.com/v1/audio/transcriptions",
-	transcriptionModel: "whisper-1",
+	// OpenAI Configuration
+	openaiApiKey: "",
+	openaiApiUrl: "https://api.openai.com/v1",
+
+	// Model Settings
+	whisperModel: "whisper-1",
+	completionsModel: "gpt-4o-mini",
+	language: "",
+
+	// Transcription Settings
 	transcriptionPrompt: "",
-	language: "en",
 	saveAudioFile: true,
 	saveAudioFilePath: "",
 	createNewFileAfterRecording: true,
 	createNewFileAfterRecordingPath: "",
 	saveRecordingToClipboard: true,
 
-	completionApiKey: "",
-	completionApiUrl: "https://api.openai.com/v1",
-	completionModel: "gpt-4o-mini",
-	completionPrompt: "",
-	saveDraftsFilePath: "",
-	lastUsedPreset: "",
+	// Ghost Writer Settings
 	ghostWriterSystemPrompt: `
 You are a professional Ghost Writer that writes the content draft for a {{contentType}}.
 You are tasked to write a {{contentType}} based on the thoughts and ideas provided by the user.
@@ -66,12 +73,11 @@ Use the following creativity level: "{{creativity}}" - {{creativityDescription}}
 Generate a sensible title, the perfect content according to the users thoughts, a very brief description for 
 the {{contentType}} (max. 250 Characters) and also up to 2-4 useful tags.
 `,
+	completionPrompt: "",
+	saveDraftsFilePath: "",
+	lastUsedPreset: "",
 
-	autoReadActiveFile: false,
-	autoReadActiveFileIncludeExcludeType: "path",
-	autoReadActiveFileExclude: [],
-	autoReadActiveFileInclude: [],
-	autoReadMinimumCharacterCount: 25,
+	// Ghost Reader Settings
 	ghostReaderSystemPrompt: `
 You are a helpful Ghost Reader that generates insightful and questions to further 
 lead the thoughts of the user to explore the topic / idea at hand, 
@@ -100,6 +106,12 @@ What might the audience ({{audience}}) want to know about the topic?
 Make them direct questions, directly address the user with "you" in your questions.
 Make the questions balanced between more general questions around the topic and specific questions about some details of the thoughts.
 `,
+	ghostReaderMaxQuestions: 6,
+	autoReadActiveFile: false,
+	autoReadActiveFileIncludeExcludeType: "path",
+	autoReadActiveFileExclude: [],
+	autoReadActiveFileInclude: [],
+	autoReadMinimumCharacterCount: 25,
 
 	debugMode: false,
 };
@@ -113,10 +125,42 @@ export class SettingsManager {
 	}
 
 	async loadSettings(): Promise<WhisperBuddySettings> {
+		const loadedData: any = await this.plugin.loadData();
+		
+		// Auto-migrate old settings to new structure
+		if (loadedData) {
+			if (loadedData.transcriptionApiKey && !loadedData.openaiApiKey) {
+				loadedData.openaiApiKey = loadedData.transcriptionApiKey;
+				delete loadedData.transcriptionApiKey;
+			}
+			if (loadedData.completionApiKey && !loadedData.openaiApiKey) {
+				loadedData.openaiApiKey = loadedData.completionApiKey;
+				delete loadedData.completionApiKey;
+			}
+			if (loadedData.transcriptionApiUrl && !loadedData.openaiApiUrl) {
+				// Use completion URL if available, otherwise transcription URL
+				loadedData.openaiApiUrl = loadedData.completionApiUrl || loadedData.transcriptionApiUrl;
+				delete loadedData.transcriptionApiUrl;
+			}
+			if (loadedData.completionApiUrl && !loadedData.openaiApiUrl) {
+				loadedData.openaiApiUrl = loadedData.completionApiUrl;
+			}
+			delete loadedData.completionApiUrl;
+			
+			if (loadedData.transcriptionModel && !loadedData.whisperModel) {
+				loadedData.whisperModel = loadedData.transcriptionModel;
+				delete loadedData.transcriptionModel;
+			}
+			if (loadedData.completionModel && !loadedData.completionsModel) {
+				loadedData.completionsModel = loadedData.completionModel;
+				delete loadedData.completionModel;
+			}
+		}
+		
 		return Object.assign(
 			{},
 			DEFAULT_SETTINGS,
-			await this.plugin.loadData()
+			loadedData
 		);
 	}
 

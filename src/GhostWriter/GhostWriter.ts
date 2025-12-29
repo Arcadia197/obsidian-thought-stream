@@ -1,7 +1,7 @@
 import WhisperBuddy from "../../main";
 import {Observable} from "../Observable";
 import OpenAI from "openai";
-import {zodResponseFormat, zodTextFormat} from "openai/helpers/zod";
+import {zodTextFormat} from "openai/helpers/zod";
 import {z} from "zod";
 import {MarkdownView, Notice, TFile} from "obsidian";
 import {
@@ -117,44 +117,47 @@ export class GhostWriter {
 		}
 
 		const client = this.plugin.aiClient.client;
-		const response = await client.chat.completions.create({
-			model: this.plugin.settings.completionModel || "gpt-4o-mini",
-			temperature: getTemperatureBasedOnCreativity(config.creativity || 'balanced'),
-			response_format: zodResponseFormat(DocumentObject, 'content-draft'),
-			messages: [
-				{
-					role: 'system',
-					content: parsePromptTemplate(this.plugin.settings.ghostWriterSystemPrompt, data),
-				},
-				{
-					role: 'user',
-					content: `Create a draft for a ${config.contentType || 'text'} based on the following ideas:\n\n${thoughtsContent}
-					${config.information ? `
-					---
-					Make sure to consider this following information:\n${config.information || ''}\n
-					` : ''}
-					${config.example ? `
-					---
-					You can also use the following example as a reference 
-					(consider the style and tone of writing, not so much the content!), 
-					imitate the style of this example as closely as possible:\n${config.example || ''}
-					` : ''}
-					${config.wordCount ? `
-					---
-					Please try to keep the ${config.contentType || 'text'} to around ${config.wordCount} words.
-					` : ''}
-					}
-					`,
-				},
-			]
+		const model = this.plugin.settings.completionsModel || "gpt-4o-mini";
+		// Force temperature to 1.0 for gpt-5 models and derivatives where temperature may be ignored or unsupported
+		let temperature = getTemperatureBasedOnCreativity(config.creativity || 'balanced');
+		if (/^gpt-5/i.test(model)) {
+			temperature = 1.0;
+		}
+		const response = await client.responses.create({
+			model,
+			temperature,
+			instructions: parsePromptTemplate(this.plugin.settings.ghostWriterSystemPrompt, data),
+			input: `Create a draft for a ${config.contentType || 'text'} based on the following ideas:\n\n${thoughtsContent}
+			${config.information ? `
+			---
+			Make sure to consider this following information:\n${config.information || ''}\n
+			` : ''}
+			${config.example ? `
+			---
+			You can also use the following example as a reference 
+			(consider the style and tone of writing, not so much the content!), 
+			imitate the style of this example as closely as possible:\n${config.example || ''}
+			` : ''}
+			${config.wordCount ? `
+			---
+			Please try to keep the ${config.contentType || 'text'} to around ${config.wordCount} words.
+			` : ''}
+			}`,
+			text: {
+				format: zodTextFormat(DocumentObject, 'content-draft'),
+			},
 		}).catch((reason: any) => {
 			this.$error.value = `Error generating questions: ${reason.message}`;
 		});
 
 		this.$state.set('idle')
 
-		// @ts-ignore
-		const fetchedDocument = DocumentObject.parse(JSON.parse(response?.choices[0].message.content)) as Doc;
+		if (!response || !response.output_text) {
+			this.$error.value = `No response received from the AI`;
+			return {} as Doc;
+		}
+
+		const fetchedDocument = DocumentObject.parse(JSON.parse(response.output_text)) as Doc;
 
 		if (src instanceof TFile) {
 			fetchedDocument.srcFile = src;

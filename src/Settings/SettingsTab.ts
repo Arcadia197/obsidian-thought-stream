@@ -24,30 +24,37 @@ export class SettingsTab extends PluginSettingTab {
 		this.createHeader('Whisper Buddy Settings', 'h1');
 		this.createQuickAccess();
 
-		this.createHeader('Ghost Whisper');
+		this.createHeader('OpenAI Configuration');
 		this.createApiKeySetting();
 		this.createApiUrlSetting();
-		this.createModelSetting();
-		this.createTranscriptionPromptSetting();
+		this.createT2SModelSetting();
+		this.createCompletionModelSetting();
+
+		this.createHeader('Ghost Whisper');
 		this.createLanguageSetting();
+		this.createTranscriptionPromptSetting();
 		this.createSaveAudioFileToggleSetting();
-		this.createSaveAudioFilePathSetting();
+		if (this.plugin.settings.saveAudioFile) {
+			this.createSaveAudioFilePathSetting();
+		}
 		this.createNewFileToggleSetting();
-		this.createNewFilePathSetting();
+		if (this.plugin.settings.createNewFileAfterRecording) {
+			this.createNewFilePathSetting();
+		}
 		this.copyRecordingToClipboardToggleSetting();
 
 		this.createHeader('Ghost Writer');
-		this.createCompletionApiKeySetting();
-		this.createCompletionApiUrlSetting();
-		this.createCompletionModelSetting();
 		this.saveDraftsFilePathSetting();
 		this.ghostWriterSystemPromptSetting();
 
 		this.createHeader('Ghost Reader');
 		this.autoReadActiveFileToggleSetting();
-		this.createAutoReadActiveFileIncludeSetting();
-		this.createAutoReadActiveFileExcludeSetting();
+		if (this.plugin.settings.autoReadActiveFile) {
+			this.createAutoReadActiveFileIncludeSetting();
+			this.createAutoReadActiveFileExcludeSetting();
+		}
 		this.createMinimumCharacterCountSetting();
+		this.createMaxQuestionsSetting();
 		this.ghostReaderSystemPromptSetting();
 
 		this.createHeader('Development');
@@ -131,9 +138,9 @@ export class SettingsTab extends PluginSettingTab {
 			"API Key",
 			"Enter your OpenAI API key",
 			"sk-...xxxx",
-			this.plugin.settings.transcriptionApiKey,
+			this.plugin.settings.openaiApiKey,
 			async (value) => {
-				this.plugin.settings.transcriptionApiKey = value;
+				this.plugin.settings.openaiApiKey = value;
 				await this.settingsManager.saveSettings(this.plugin.settings);
 			}
 		);
@@ -144,39 +151,28 @@ export class SettingsTab extends PluginSettingTab {
 			"API URL",
 			"Specify the endpoint that will be used to make requests to",
 			"https://api.your-custom-url.com",
-			this.plugin.settings.transcriptionApiUrl,
+			this.plugin.settings.openaiApiUrl,
 			async (value) => {
-				this.plugin.settings.transcriptionApiUrl = value;
+				this.plugin.settings.openaiApiUrl = value;
 				await this.settingsManager.saveSettings(this.plugin.settings);
 			}
 		);
 	}
 
-	private createModelSetting(): void {
+	private createT2SModelSetting(): void {
 		this.createTextSetting(
-			"Model",
-			"Specify the machine learning model to use for generating text",
+			"Whisper Model",
+			"Specify the machine learning model to use for speech-to-text transcription",
 			"whisper-1",
-			this.plugin.settings.transcriptionModel,
+			this.plugin.settings.whisperModel,
 			async (value) => {
-				this.plugin.settings.transcriptionModel = value;
+				this.plugin.settings.whisperModel = value;
 				await this.settingsManager.saveSettings(this.plugin.settings);
 			}
 		);
 	}
 
 	private createTranscriptionPromptSetting(): void {
-		// this.createTextSetting(
-		// 	"Prompt",
-		// 	"Optional: Add words with their correct spellings to help with transcription. Make sure it matches the chosen language.",
-		// 	"Example: ZyntriQix, Digique Plus, CynapseFive",
-		// 	this.plugin.settings.transcriptionPrompt,
-		// 	async (value) => {
-		// 		this.plugin.settings.transcriptionPrompt = value;
-		// 		await this.settingsManager.saveSettings(this.plugin.settings);
-		// 	}
-		// );
-
 		new Setting(this.containerEl)
 			.setClass('setting-item-textarea-full-width')
 			.setName("Transcription Prompt")
@@ -199,8 +195,8 @@ export class SettingsTab extends PluginSettingTab {
 	private createLanguageSetting(): void {
 		this.createTextSetting(
 			"Language",
-			"Specify the language of the message being whispered",
-			"en",
+			"Optional: Specify language code (e.g., 'en', 'de'). Leave empty for automatic language detection (recommended for multilingual use)",
+			"Leave empty for auto-detect",
 			this.plugin.settings.language,
 			async (value) => {
 				this.plugin.settings.language = value;
@@ -215,7 +211,7 @@ export class SettingsTab extends PluginSettingTab {
 			.setDesc(
 				"Turn on to save the audio file after sending it to the Whisper API"
 			)
-			.addToggle((toggle) =>
+			.addToggle((toggle) => {
 				toggle
 					.setValue(this.plugin.settings.saveAudioFile)
 					.onChange(async (value) => {
@@ -226,9 +222,13 @@ export class SettingsTab extends PluginSettingTab {
 						await this.settingsManager.saveSettings(
 							this.plugin.settings
 						);
-						this.saveAudioFileInput.setDisabled(!value);
-					})
-			);
+						if (this.saveAudioFileInput) {
+							this.saveAudioFileInput.setDisabled(!value);
+						}
+						// Re-render to show/hide the recordings folder setting
+						this.display();
+					});
+			});
 	}
 
 	private createSaveAudioFilePathSetting(): void {
@@ -276,7 +276,11 @@ export class SettingsTab extends PluginSettingTab {
 						await this.settingsManager.saveSettings(
 							this.plugin.settings
 						);
-						this.createNewFileInput.setDisabled(!value);
+						if (this.createNewFileInput) {
+							this.createNewFileInput.setDisabled(!value);
+						}
+						// Re-render to show/hide the transcription folder setting
+						this.display();
 					});
 			});
 	}
@@ -351,40 +355,14 @@ export class SettingsTab extends PluginSettingTab {
 			});
 	}
 
-	private createCompletionApiKeySetting(): void {
-		this.createTextSetting(
-			"API Key",
-			"Enter your OpenAI API key for content generation",
-			"sk-...xxxx",
-			this.plugin.settings.completionApiKey || this.plugin.settings.transcriptionApiKey,
-			async (value) => {
-				this.plugin.settings.completionApiKey = value;
-				await this.settingsManager.saveSettings(this.plugin.settings);
-			}
-		);
-	}
-
-	private createCompletionApiUrlSetting(): void {
-		this.createTextSetting(
-			"API URL",
-			"Specify the endpoint that will be used to make requests to for content generation",
-			"https://api.your-custom-url.com",
-			this.plugin.settings.completionApiUrl,
-			async (value) => {
-				this.plugin.settings.completionApiUrl = value;
-				await this.settingsManager.saveSettings(this.plugin.settings);
-			}
-		);
-	}
-
 	private createCompletionModelSetting(): void {
 		this.createTextSetting(
-			"Model",
-			"Specify the machine learning model to use for content generation",
+			"Completions Model",
+			"Specify the machine learning model to use for content generation (Ghost Writer & Ghost Reader)",
 			"gpt-4o-mini",
-			this.plugin.settings.completionModel,
+			this.plugin.settings.completionsModel,
 			async (value) => {
-				this.plugin.settings.completionModel = value;
+				this.plugin.settings.completionsModel = value;
 				await this.settingsManager.saveSettings(this.plugin.settings);
 			}
 		);
@@ -466,6 +444,8 @@ export class SettingsTab extends PluginSettingTab {
 						await this.settingsManager.saveSettings(
 							this.plugin.settings
 						);
+						// Re-render the settings UI so include/exclude settings appear/disappear immediately
+						this.display();
 					});
 			});
 	}
@@ -486,6 +466,30 @@ export class SettingsTab extends PluginSettingTab {
 						const count = parseInt(value, 10);
 						if (!isNaN(count)) {
 							this.plugin.settings.autoReadMinimumCharacterCount = count;
+							await this.settingsManager.saveSettings(
+								this.plugin.settings
+							);
+						}
+					});
+			});
+	}
+
+	private createMaxQuestionsSetting(): void {
+		new Setting(this.containerEl)
+			.setName("Maximum questions")
+			.setDesc(
+				"Set the maximum number of questions Ghost Reader will generate."
+			)
+			.addText((text) => {
+				text
+					.setPlaceholder("Example: 6")
+					.setValue(
+						this.plugin.settings.ghostReaderMaxQuestions.toString()
+					)
+					.onChange(async (value) => {
+						const count = parseInt(value, 10);
+						if (!isNaN(count) && count > 0) {
+							this.plugin.settings.ghostReaderMaxQuestions = count;
 							await this.settingsManager.saveSettings(
 								this.plugin.settings
 							);

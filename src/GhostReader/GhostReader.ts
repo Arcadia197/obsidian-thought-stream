@@ -1,24 +1,11 @@
 import WhisperBuddy from "../../main";
 import {Observable} from "../Observable";
-import {zodResponseFormat} from "openai/helpers/zod";
+import {zodTextFormat} from "openai/helpers/zod";
 import {z} from "zod";
 import {getActiveFile, getFrontMatterByFile, parsePromptTemplate} from "../utils";
 import {MarkdownView, Notice, TFile} from "obsidian";
 
 export type GhostReaderState = 'loading' | 'idle' | 'error';
-
-export type GhostReaderConfig = {
-	maxQuestions: number,
-	model: string,
-	temperature: number,
-	audience?: string,
-};
-
-const defaultConfig: GhostReaderConfig = {
-	maxQuestions: 10,
-	model: "gpt-4o-mini",
-	temperature: 0.7,
-}
 
 const QuestionsObject = z.object({
 	questions: z.array(z.string()),
@@ -184,7 +171,7 @@ export class GhostReader {
 		await this.plugin.controller.startRecording();
 	}
 
-	async autoGenerateForActiveFile(config: Partial<GhostReaderConfig> = defaultConfig): Promise<void> {
+	async autoGenerateForActiveFile(): Promise<void> {
 		const file = getActiveFile(this.plugin.app);
 		if (!file) {
 			new Notice("No active file found to auto-generate questions for.");
@@ -205,7 +192,7 @@ export class GhostReader {
 			new Notice(`Auto-generating questions for file: ${file.path}`);
 		}
 
-		await this.getQuestions(file, config);
+		await this.getQuestions(file);
 	}
 
 	allowAutoReadFile(file: TFile): boolean {
@@ -243,7 +230,7 @@ export class GhostReader {
 		return true;
 	}
 
-	async autoReadActiveFileOnEditorChange(config: Partial<GhostReaderConfig> = defaultConfig): Promise<void> {
+	async autoReadActiveFileOnEditorChange(): Promise<void> {
 		const activeFile = getActiveFile(this.plugin.app);
 		if (!activeFile) {
 			new Notice("No active file found to auto-read on editor change.");
@@ -278,10 +265,10 @@ export class GhostReader {
 			new Notice(`Auto-reading active file on editor change: ${activeFile.path}`);
 		}
 
-		await this.generateForActiveFile(config);
+		await this.generateForActiveFile();
 	}
 
-	async generateForActiveFile(config: Partial<GhostReaderConfig> = defaultConfig): Promise<void> {
+	async generateForActiveFile(): Promise<void> {
 		const file = getActiveFile(this.plugin.app);
 		if (!file) {
 			new Notice("No active file found to generate questions for.");
@@ -295,10 +282,10 @@ export class GhostReader {
 		await this.getQuestions(file);
 	}
 
-	async getQuestions(src: string|TFile, config: Partial<GhostReaderConfig> = defaultConfig): Promise<string[]> {
+	async getQuestions(src: string|TFile): Promise<string[]> {
 		this.$state.set('loading')
 		this.$error.set(null);
-		let data: Record<string, any> = config;
+		let data: Record<string, any> = {};
 
 		let thoughtsContent = '';
 		if (src instanceof TFile) {
@@ -306,41 +293,51 @@ export class GhostReader {
 			const frontmatter = await getFrontMatterByFile(this.plugin.app, src);
 			data = {
 				...frontmatter,
-				...config,
 			};
 		} else {
 			thoughtsContent = src;
 		}
 
 		const client = this.plugin.aiClient.client;
-		const response = await client.chat.completions.create({
-			model: config.model || "gpt-4o-mini",
-			temperature: config.temperature || 1,
-			response_format:  zodResponseFormat(QuestionsObject, 'questions'),
-			messages: [
-				{
-					role: 'system',
-					content: parsePromptTemplate(this.plugin.settings.ghostReaderSystemPrompt, data),
-				},
-				{
-					role: 'user',
-					content: `Generate up to ${config.maxQuestions || 3} questions based on the following thoughts:\n\n${thoughtsContent}`,
-				},
-			]
+		const model = this.plugin.settings.completionsModel || "gpt-4o-mini";
+		// Default temperature for GhostReader is 0.7; force 1.0 for gpt-5 family
+		let temperature = 0.7;
+		if (/^gpt-5/i.test(model)) {
+			temperature = 1.0;
+		}
+
+		const response = await client.responses.create({
+			model: model,
+			temperature: temperature,
+			instructions: parsePromptTemplate(this.plugin.settings.ghostReaderSystemPrompt, data),
+			input: `Generate up to ${this.plugin.settings.ghostReaderMaxQuestions || 6} questions based on the following thoughts:\n\n${thoughtsContent}`,
+			text: {
+				format: zodTextFormat(QuestionsObject, 'questions'),
+			},
 		}).catch(reason => {
 			this.$error.value = `Error generating questions: ${reason.message}`;
 		});
 
 		this.$state.set('idle')
 
-		// @ts-ignore
-		const fetchedQuestions = QuestionsObject.parse(JSON.parse(response.choices[0].message.content)).questions;
+		if (!response || !response.output_text) {
+			this.$error.value = `No response received from the AI`;
+			return [];
+		}
+
+		if (this.plugin.settings.debugMode && response.usage) {
+			const model = this.plugin.settings.completionsModel || "gpt-4o-mini";
+			const inputTokens = response.usage.input_tokens || 0;
+			const outputTokens = response.usage.output_tokens || 0;
+			const totalTokens = response.usage.total_tokens || (inputTokens + outputTokens);
+			console.log(`Ghost Reader Token Usage - Model: ${model}, Input: ${inputTokens}, Output: ${outputTokens}, Total: ${totalTokens}`);
+			new Notice(`${model}: ${totalTokens} tokens (${inputTokens} in, ${outputTokens} out)`);
+		}
+
+		const fetchedQuestions = QuestionsObject.parse(JSON.parse(response.output_text)).questions;
 		this.$questions.value = fetchedQuestions;
 		if (src instanceof TFile) {
 			await this.setQuestionsInFrontmatter(fetchedQuestions);
-			if (this.plugin.settings.debugMode) {
-				new Notice(`Set questions in frontmatter for file: ${src.path}`);
-			}
 		}
 		console.log(fetchedQuestions);
 		return fetchedQuestions;

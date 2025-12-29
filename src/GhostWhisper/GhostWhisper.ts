@@ -38,7 +38,7 @@ export class GhostWhisper {
 			new Notice(`Sending audio data size: ${blob.size / 1000} KB`);
 		}
 
-		if (!this.plugin.settings.transcriptionApiKey) {
+		if (!this.plugin.settings.openaiApiKey) {
 			new Notice(
 				"API key is missing. Please add your API key in the settings."
 			);
@@ -59,8 +59,9 @@ export class GhostWhisper {
 
 		const formData = new FormData();
 		formData.append("file", blob, fileName);
-		formData.append("model", this.plugin.settings.transcriptionModel);
-		formData.append("language", this.plugin.settings.language);
+		formData.append("model", this.plugin.settings.whisperModel);
+		if (this.plugin.settings.language)
+			formData.append("language", this.plugin.settings.language);
 		if (this.plugin.settings.transcriptionPrompt)
 			formData.append("prompt", parsePromptTemplate(this.plugin.settings.transcriptionPrompt, data));
 
@@ -70,7 +71,7 @@ export class GhostWhisper {
 				const arrayBuffer = await blob.arrayBuffer();
 				await this.plugin.app.vault.adapter.writeBinary(
 					audioFilePath,
-					new Uint8Array(arrayBuffer)
+					arrayBuffer
 				);
 				new Notice("Audio saved successfully.");
 			}
@@ -84,12 +85,12 @@ export class GhostWhisper {
 				new Notice("Parsing audio data:" + fileName);
 			}
 			const response = await axios.post(
-				this.plugin.settings.transcriptionApiUrl,
+				`${this.plugin.settings.openaiApiUrl}/audio/transcriptions`,
 				formData,
 				{
 					headers: {
 						"Content-Type": "multipart/form-data",
-						Authorization: `Bearer ${this.plugin.settings.transcriptionApiKey}`,
+						Authorization: `Bearer ${this.plugin.settings.openaiApiKey}`,
 					},
 				}
 			);
